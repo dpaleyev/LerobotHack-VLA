@@ -3,6 +3,7 @@ import random
 import copy
 import numpy as np
 import glfw
+import mujoco
 
 from mujoco_env.mujoco_parser import MuJoCoParserClass
 from mujoco_env.utils import sample_xyzs, rotation_matrix, add_title_to_img
@@ -67,6 +68,8 @@ class SimpleEnv:
 
         self.gripper_state = False
         self.past_chars = []
+        self._episode_counter = 0
+        self.cube_half_extent = 0.015
 
         self.init_viewer()
         self.reset(seed)
@@ -94,14 +97,40 @@ class SimpleEnv:
             visible_window=self._visible_window,
         )
 
+    def _apply_cube_half_extent(self, half: float):
+        """Размер куба (половина ребра) и сайты success; масса ∝ объёму."""
+        m, d = self.env.model, self.env.data
+        half = float(np.clip(half, 0.01, 0.025))
+        self.cube_half_extent = half
+        gid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "small_cube_geom")
+        if gid < 0:
+            return
+        ref_half = 0.015
+        m.geom_size[gid] = [half, half, half]
+        bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "body_obj_cube")
+        if bid >= 0:
+            m.body_mass[bid] = 0.1 * (half / ref_half) ** 3
+        for sname, z in (("bottom_site_cube", -half), ("top_site_cube", half)):
+            sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, sname)
+            if sid >= 0:
+                m.site_pos[sid] = [0.0, 0.0, z]
+        mujoco.mj_setConst(m, d)
+        mujoco.mj_forward(m, d)
+
     def reset(self, seed=None):
         """
         Reset the environment:
         - set robot to a comfortable initial pose
-        - randomize object positions
+        - randomize cube size (half-edge 0.01…0.25) and plate/cube poses in reach
         """
+        self._episode_counter += 1
         if seed is not None:
             np.random.seed(seed)
+        # Отдельный RNG на эпизод: при фиксированном seed каждый сброс даёт новую выкладку
+        if seed is not None:
+            rng = np.random.default_rng(int(seed) + 1_000_003 * self._episode_counter)
+        else:
+            rng = np.random.default_rng()
 
         # Стартовая поза SO-101:
         # 1) shoulder_pan = 0 -> нижний сервопривод строго по центру
@@ -121,21 +150,30 @@ class SimpleEnv:
         # Сразу ставим робота в эту позу, без IK
         self.env.forward(q=q_full, joint_names=self.joint_names, increase_tick=False)
 
-        # Randomize object positions
+        # Случайный размер куба (половина ребра), затем позы объектов в зоне досягаемости
+        cube_half = float(rng.uniform(0.01, 0.02))
+        self._apply_cube_half_extent(cube_half)
+
         obj_names = self.env.get_body_names(prefix="body_obj_")
         n_obj = len(obj_names)
+        # SO-101: стол ~0.82; досягаемость ~ x∈[0.18,0.40], y∈[-0.20,0.20] относительно сцены
         obj_xyzs = sample_xyzs(
             n_obj,
-            x_range=[+0.24, +0.4],
-            y_range=[-0.2, +0.2],
+            x_range=[0.18, 0.35],
+            y_range=[-0.20, 0.15],
             z_range=[0.82, 0.82],
-            min_dist=0.2,
-            xy_margin=0.0
+            min_dist=0.14,
+            xy_margin=0.02,
+            rng=rng,
         )
 
         for obj_idx in range(n_obj):
             self.env.set_p_base_body(body_name=obj_names[obj_idx], p=obj_xyzs[obj_idx, :])
-            self.env.set_R_base_body(body_name=obj_names[obj_idx], R=np.eye(3, 3))
+            yaw = float(rng.uniform(0.0, 2.0 * np.pi))
+            self.env.set_R_base_body(
+                body_name=obj_names[obj_idx],
+                R=rpy2r(np.array([0.0, 0.0, yaw], dtype=np.float64)),
+            )
 
         self.env.forward(increase_tick=False)
 

@@ -91,21 +91,39 @@ def get_colors(n_color=10,cmap_name='gist_rainbow',alpha=1.0):
         colors[idx] = color
     return colors
 
-def sample_xyzs(n_sample=1,x_range=[0,1],y_range=[0,1],z_range=[0,1],min_dist=0.1,xy_margin=0.0):
+def sample_xyzs(
+    n_sample=1,
+    x_range=[0, 1],
+    y_range=[0, 1],
+    z_range=[0, 1],
+    min_dist=0.1,
+    xy_margin=0.0,
+    rng=None,
+):
     """
-        Sample a point in three dimensional space with the minimum distance between points
+    Sample points in 3D with minimum distance between points.
+
+    rng: optional ``numpy.random.Generator``; if None, uses ``numpy.random``.
     """
-    xyzs = np.zeros((n_sample,3))
+    xyzs = np.zeros((n_sample, 3))
+
+    def _u(low, high):
+        if rng is None:
+            return np.random.uniform(low=low, high=high)
+        return float(rng.uniform(low=low, high=high))
+
     for p_idx in range(n_sample):
         while True:
-            x_rand = np.random.uniform(low=x_range[0]+xy_margin,high=x_range[1]-xy_margin)
-            y_rand = np.random.uniform(low=y_range[0]+xy_margin,high=y_range[1]-xy_margin)
-            z_rand = np.random.uniform(low=z_range[0],high=z_range[1])
-            xyz = np.array([x_rand,y_rand,z_rand])
-            if p_idx == 0: break
-            devc = cdist(xyz.reshape((-1,3)),xyzs[:p_idx,:].reshape((-1,3)),'euclidean')
-            if devc.min() > min_dist: break # minimum distance between objects
-        xyzs[p_idx,:] = xyz
+            x_rand = _u(x_range[0] + xy_margin, x_range[1] - xy_margin)
+            y_rand = _u(y_range[0] + xy_margin, y_range[1] - xy_margin)
+            z_rand = _u(z_range[0], z_range[1])
+            xyz = np.array([x_rand, y_rand, z_rand])
+            if p_idx == 0:
+                break
+            devc = cdist(xyz.reshape((-1, 3)), xyzs[:p_idx, :].reshape((-1, 3)), "euclidean")
+            if devc.min() > min_dist:
+                break
+        xyzs[p_idx, :] = xyz
     return xyzs
 
 class ObjectSpawner:

@@ -8,7 +8,7 @@ from pathlib import Path
 class CollectDataConfig:
     seed: int | None = 0
     repo_name: str = "so101_pnp"
-    num_demo: int = 3
+    num_demo: int = 50
     root: Path = Path("./demo_data")
     use_master_arm: bool = True
     leader_port: str = "/dev/ttyACM0"
