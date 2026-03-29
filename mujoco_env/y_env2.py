@@ -187,17 +187,11 @@ class SimpleEnv2:
         '''
         grab images from the environment
         returns:
-            rgb_agent: np.array, rgb image from the agent's view
-            rgb_ego: np.array, rgb image from the egocentric
+            rgb_agent: np.array, cam_front (на столе)
+            rgb_ego: np.array, cam_side (на столе)
         '''
-        self.rgb_agent = self.env.get_fixed_cam_rgb(
-            cam_name='agentview')
-        self.rgb_ego = self.env.get_fixed_cam_rgb(
-            cam_name='egocentric')
-        # self.rgb_top = self.env.get_fixed_cam_rgbd_pcd(
-        #     cam_name='topview')
-        self.rgb_side = self.env.get_fixed_cam_rgb(
-            cam_name='sideview')
+        self.rgb_agent = self.env.get_fixed_cam_rgb(cam_name="cam_front")
+        self.rgb_ego = self.env.get_fixed_cam_rgb(cam_name="cam_side")
         return self.rgb_agent, self.rgb_ego
         
 
@@ -210,14 +204,12 @@ class SimpleEnv2:
         R_current = R_current @ np.array([[1,0,0],[0,0,1],[0,1,0 ]])
         self.env.plot_sphere(p=p_current, r=0.02, rgba=[0.95,0.05,0.05,0.5])
         self.env.plot_capsule(p=p_current, R=R_current, r=0.01, h=0.2, rgba=[0.05,0.95,0.05,0.5])
-        rgb_egocentric_view = add_title_to_img(self.rgb_ego,text='Egocentric View',shape=(640,480))
-        rgb_agent_view = add_title_to_img(self.rgb_agent,text='Agent View',shape=(640,480))
+        rgb_side_view = add_title_to_img(self.rgb_ego, text="Side cam", shape=(640, 480))
+        rgb_front_view = add_title_to_img(self.rgb_agent, text="Front cam", shape=(640, 480))
         self.env.plot_T(p = np.array([0.1,0.0,1.0]), label=f"Episode {idx}", plot_axis=False, plot_sphere=False)
-        self.env.viewer_rgb_overlay(rgb_agent_view,loc='top right')
-        self.env.viewer_rgb_overlay(rgb_egocentric_view,loc='bottom right')
+        self.env.viewer_rgb_overlay(rgb_front_view, loc='top right')
+        self.env.viewer_rgb_overlay(rgb_side_view, loc='bottom right')
         if teleop:
-            rgb_side_view = add_title_to_img(self.rgb_side,text='Side View',shape=(640,480))
-            self.env.viewer_rgb_overlay(rgb_side_view, loc='top left')
             self.env.viewer_text_overlay(text1='Key Pressed',text2='%s'%(self.env.get_key_pressed_list()))
             self.env.viewer_text_overlay(text1='Key Repeated',text2='%s'%(self.env.get_key_repeated_list()))
         if getattr(self, 'instruction', None) is not None:

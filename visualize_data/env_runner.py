@@ -48,7 +48,6 @@ def replay_episode(config: VisualizeDataConfig, env: SimpleEnv, dataloader, epis
 
         env.rgb_agent = rgb_agent
         env.rgb_ego = rgb_wrist
-        env.rgb_side = np.zeros((480, 640, 3), dtype=np.uint8)
 
         env.render()
         step += 1
@@ -101,7 +100,6 @@ def replay_all_episodes(config: VisualizeDataConfig, env: SimpleEnv, episode_loa
 
         env.rgb_agent = rgb_agent
         env.rgb_ego = rgb_wrist
-        env.rgb_side = np.zeros((480, 640, 3), dtype=np.uint8)
 
         env.render()
         step += 1

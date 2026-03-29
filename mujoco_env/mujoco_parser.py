@@ -199,6 +199,7 @@ class MuJoCoMinimalViewer(MinimalCallbacks):
             perturbation      = True,
             use_rgb_overlay   = True,
             loc_rgb_overlay   = 'top right',
+            visible           = True,
         ):
         super().__init__(hide_menus)
 
@@ -218,12 +219,26 @@ class MuJoCoMinimalViewer(MinimalCallbacks):
         # glfw init
         glfw.init()
 
-        if not width:
-            width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
+        if width is None or height is None:
+            mon = glfw.get_primary_monitor()
+            if mon is not None:
+                vm = glfw.get_video_mode(mon)
+                if vm is not None and hasattr(vm, "size"):
+                    sz = vm.size
+                    if width is None:
+                        width = getattr(sz, "width", sz[0])
+                    if height is None:
+                        height = getattr(sz, "height", sz[1])
+        if width is None:
+            width = 1400
+        if height is None:
+            height = 1000
 
-        if not height:
-            _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
-            
+        if hasattr(glfw, "default_window_hints"):
+            glfw.default_window_hints()
+        if not visible:
+            glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+
         if self.render_mode == 'offscreen':
             glfw.window_hint(glfw.VISIBLE, 0)
 
@@ -916,7 +931,7 @@ class MuJoCoParserClass(object):
             cam.fixedcamid = self.model.cam(cam_name).id
             cam.type       = mujoco.mjtCamera.mjCAMERA_FIXED
             cam_fov        = self.model.cam_fovy[cam_idx]
-            viewport       = mujoco.MjrRect(0,0,800,600) # SVGA?
+            viewport       = mujoco.MjrRect(0, 0, 640, 480)
             # Append
             self.cams.append(cam)
             self.cam_fovs.append(cam_fov)
@@ -1141,6 +1156,7 @@ class MuJoCoParserClass(object):
             use_rgb_overlay   = False,
             loc_rgb_overlay   = 'top right',
             pre_render        = False,
+            visible_window    = True,
         ):
         """
         Initialize the MuJoCo viewer with the given parameters.
@@ -1200,6 +1216,7 @@ class MuJoCoParserClass(object):
             n_fig             = n_fig,
             use_rgb_overlay   = use_rgb_overlay,
             loc_rgb_overlay   = loc_rgb_overlay,
+            visible           = visible_window,
         )
         self.viewer.ctx = mujoco.MjrContext(self.model,fontscale)
         

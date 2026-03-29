@@ -48,12 +48,12 @@ def create_or_load_dataset(config: CollectDataConfig) -> LeRobotDataset:
             features={
                 "observation.image": {
                     "dtype": "image",
-                    "shape": (256, 256, 3),
+                    "shape": (480, 640, 3),
                     "names": ["height", "width", "channels"],
                 },
                 "observation.wrist_image": {
                     "dtype": "image",
-                    "shape": (256, 256, 3),
+                    "shape": (480, 640, 3),
                     "names": ["height", "width", "channel"],
                 },
                 "observation.state": {

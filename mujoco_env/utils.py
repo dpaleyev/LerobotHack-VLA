@@ -1,5 +1,4 @@
 import os
-import pyautogui
 import sys
 import time
 import numpy as np
@@ -402,11 +401,16 @@ def depth_to_gray_img(depth,max_val=10.0):
     return img
 
 def get_monitor_size():
-    """ 
-        Get monitor size
     """
-    w,h = pyautogui.size()
-    return w,h
+    Размер экрана для init_viewer. PyAutoGUI тянет X11 при импорте и ломает ядро Jupyter
+    без DISPLAY; поэтому импорт отложен и есть запасной вариант.
+    """
+    try:
+        import pyautogui
+
+        return pyautogui.size()
+    except Exception:
+        return (1920, 1080)
     
 def get_xml_string_from_path(xml_path):
     # Parse the XML file

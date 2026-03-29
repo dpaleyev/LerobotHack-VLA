@@ -1,3 +1,4 @@
+import os
 import random
 import copy
 import numpy as np
@@ -16,6 +17,7 @@ class SimpleEnv:
         action_type="eef_pose",
         state_type="joint_angle",
         seed=None,
+        visible_window=True,
     ):
         """
         Args:
@@ -29,7 +31,13 @@ class SimpleEnv:
                 - 'ee_pose'
                 - 'delta_q'
             seed: int or None
+            visible_window: показывать ли GLFW-окно MuJoCo. В Jupyter/Cursor при падении ядра
+                попробуйте False (рендер камер для датасета сохраняется).
+                Либо до импорта mujoco_env: os.environ[\"MUJOCO_GLFW_VISIBLE\"] = \"0\".
         """
+        if os.environ.get("MUJOCO_GLFW_VISIBLE", "").strip() == "0":
+            visible_window = False
+        self._visible_window = visible_window
         self.env = MuJoCoParserClass(name="Tabletop", rel_xml_path=xml_path)
         self.action_type = action_type
         self.state_type = state_type
@@ -48,10 +56,9 @@ class SimpleEnv:
         # End-effector body/site in SO-101
         self.ee_body_name = "gripper"
 
-        # Camera names available in your current scene
-        self.agent_cam_name = "agentview"
-        self.ego_cam_name = "topview"   # fallback instead of missing 'egocentric'
-        self.side_cam_name = "sideview"
+        # Две камеры на столе (object_table.xml): cam_front / cam_side
+        self.agent_cam_name = "cam_front"
+        self.ego_cam_name = "cam_side"
 
         # Full control vector [5 arm joints + 1 gripper]
         self.q = np.zeros(len(self.joint_names), dtype=np.float32)
@@ -84,6 +91,7 @@ class SimpleEnv:
             black_sky=True,
             use_rgb_overlay=False,
             loc_rgb_overlay="top right",
+            visible_window=self._visible_window,
         )
 
     def reset(self, seed=None):
@@ -137,9 +145,9 @@ class SimpleEnv:
 
         self.p0, self.R0 = self.env.get_pR_body(body_name=self.ee_body_name)
 
-        mug_init_pose, plate_init_pose = self.get_obj_pose()
+        cube_init_pose, plate_init_pose = self.get_obj_pose()
         self.obj_init_pose = np.concatenate(
-            [mug_init_pose, plate_init_pose], dtype=np.float32
+            [cube_init_pose, plate_init_pose], dtype=np.float32
         )
 
         for _ in range(100):
@@ -245,12 +253,11 @@ class SimpleEnv:
         Grab images from the environment.
 
         Returns:
-            rgb_agent: RGB image from agent view
-            rgb_ego:   RGB image from top/ego fallback view
+            rgb_agent: RGB с камеры cam_front (на столе, со стороны рабочей зоны)
+            rgb_ego:   RGB с камеры cam_side (на столе, сбоку)
         """
         self.rgb_agent = self.env.get_fixed_cam_rgb(cam_name=self.agent_cam_name)
         self.rgb_ego = self.env.get_fixed_cam_rgb(cam_name=self.ego_cam_name)
-        self.rgb_side = self.env.get_fixed_cam_rgb(cam_name=self.side_cam_name)
         return self.rgb_agent, self.rgb_ego
 
     def render(self, teleop=False):
@@ -260,21 +267,17 @@ class SimpleEnv:
 
         self.env.plot_time()
 
-        rgb_egocentric_view = add_title_to_img(
-            self.rgb_ego, text="Top View", shape=(640, 480)
+        rgb_front = add_title_to_img(
+            self.rgb_agent, text="Front cam", shape=(640, 480)
         )
-        rgb_agent_view = add_title_to_img(
-            self.rgb_agent, text="Agent View", shape=(640, 480)
+        rgb_side = add_title_to_img(
+            self.rgb_ego, text="Side cam", shape=(640, 480)
         )
 
-        self.env.viewer_rgb_overlay(rgb_agent_view, loc="top right")
-        self.env.viewer_rgb_overlay(rgb_egocentric_view, loc="bottom right")
+        self.env.viewer_rgb_overlay(rgb_front, loc="top right")
+        self.env.viewer_rgb_overlay(rgb_side, loc="bottom right")
 
         if teleop:
-            rgb_side_view = add_title_to_img(
-                self.rgb_side, text="Side View", shape=(640, 480)
-            )
-            self.env.viewer_rgb_overlay(rgb_side_view, loc="top left")
             self.env.viewer_text_overlay(
                 text1="Key Pressed", text2=f"{self.env.get_key_pressed_list()}"
             )
@@ -418,25 +421,25 @@ class SimpleEnv:
 
     def check_success(self):
         """
-        Check if mug is placed on the plate
+        Check if the cube is placed on the plate
         and gripper is open and above a height threshold.
         """
-        p_mug = self.env.get_p_body("body_obj_mug_5")
+        p_cube = self.env.get_p_body("body_obj_cube")
         p_plate = self.env.get_p_body("body_obj_plate_11")
-        p_mug_bottom = self.env.get_p_site("bottom_site_mug_5")
-        p_mug_top = self.env.get_p_site("top_site_mug_5")
+        p_cube_bottom = self.env.get_p_site("bottom_site_cube")
+        p_cube_top = self.env.get_p_site("top_site_cube")
         p_plate_top = self.env.get_p_site("top_site_plate_11")
         p_gripper = self.env.get_p_body(self.ee_body_name)
         gr = self._get_gripper_q()
 
-        mug_is_above_plate_xy = np.linalg.norm(p_mug[:2] - p_plate[:2]) < 0.08
-        mug_is_on_plate_height = abs(p_mug_bottom[2] - p_plate_top[2]) < 0.03
+        cube_is_above_plate_xy = np.linalg.norm(p_cube[:2] - p_plate[:2]) < 0.08
+        cube_is_on_plate_height = abs(p_cube_bottom[2] - p_plate_top[2]) < 0.03
         gripper_is_open = gr < 0.05
-        hand_is_raised = p_gripper[2] > (p_mug_top[2] + 0.08)
+        hand_is_raised = p_gripper[2] > (p_cube_top[2] + 0.08)
 
         return (
-            mug_is_above_plate_xy
-            and mug_is_on_plate_height
+            cube_is_above_plate_xy
+            and cube_is_on_plate_height
             and gripper_is_open
             and hand_is_raised
         )
@@ -444,26 +447,26 @@ class SimpleEnv:
     def get_obj_pose(self):
         """
         Returns:
-            mug_pose, plate_pose where each pose is [x, y, z, qw, qx, qy, qz]
+            cube_pose, plate_pose where each pose is [x, y, z, qw, qx, qy, qz]
         """
-        p_mug, R_mug = self.env.get_pR_body("body_obj_mug_5")
+        p_cube, R_cube = self.env.get_pR_body("body_obj_cube")
         p_plate, R_plate = self.env.get_pR_body("body_obj_plate_11")
-        mug_pose = np.concatenate([p_mug, r2quat(R_mug)], dtype=np.float32)
+        cube_pose = np.concatenate([p_cube, r2quat(R_cube)], dtype=np.float32)
         plate_pose = np.concatenate([p_plate, r2quat(R_plate)], dtype=np.float32)
-        return mug_pose, plate_pose
+        return cube_pose, plate_pose
 
-    def set_obj_pose(self, mug_pose, plate_pose):
+    def set_obj_pose(self, cube_pose, plate_pose):
         """
         Set object poses.
         """
-        mug_pose = np.asarray(mug_pose, dtype=np.float32)
+        cube_pose = np.asarray(cube_pose, dtype=np.float32)
         plate_pose = np.asarray(plate_pose, dtype=np.float32)
 
-        self.env.set_p_base_body(body_name="body_obj_mug_5", p=mug_pose[:3])
-        if mug_pose.shape[0] >= 7:
-            self.env.set_R_base_body(body_name="body_obj_mug_5", R=quat2r(mug_pose[3:7]))
+        self.env.set_p_base_body(body_name="body_obj_cube", p=cube_pose[:3])
+        if cube_pose.shape[0] >= 7:
+            self.env.set_R_base_body(body_name="body_obj_cube", R=quat2r(cube_pose[3:7]))
         else:
-            self.env.set_R_base_body(body_name="body_obj_mug_5", R=np.eye(3, 3))
+            self.env.set_R_base_body(body_name="body_obj_cube", R=np.eye(3, 3))
 
         self.env.set_p_base_body(body_name="body_obj_plate_11", p=plate_pose[:3])
         if plate_pose.shape[0] >= 7:
