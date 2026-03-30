@@ -32,6 +32,8 @@ ckpt/
 wandb/
 
 # Архивы и временные файлы
+*.zip
+!asset.zip
 *.log
 _example_repo/
 
