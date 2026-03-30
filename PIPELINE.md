@@ -30,6 +30,10 @@ LerobotHack-VLA/
 ├── smolvla_compat.py           # загрузка SmolVLAConfig из train_config.json
 ├── smolvla_defaults.py         # пути по умолчанию (датасет, чекпоинт)
 │
+├── Dockerfile                  # образ lerobot-workshop (PyTorch + MuJoCo + LeRobot)
+├── requirements-docker.txt     # зависимости для контейнера
+├── docker/constraints.txt      # пины torch/torchvision/torchaudio под базовый образ
+│
 ├── demo_data_merged_draft_hf/  # ФИНАЛЬНЫЙ датасет для обучения (262 эп., 113k кадров)
 ├── deprecated/                 # устаревший код (ноутбуки, старые скрипты)
 └── outputs/
@@ -192,7 +196,58 @@ python trim_demo_dataset_start.py \
 
 ---
 
-## 3. Обучение
+## 3. Docker-образ
+
+Обучение и инференс запускаются внутри контейнера `lerobot-workshop`.
+
+### Сборка образа
+
+```bash
+docker build -t lerobot-workshop .
+```
+
+Базовый образ по умолчанию: `pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime`.  
+Чтобы использовать другой тег PyTorch:
+
+```bash
+docker build \
+    --build-arg BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime \
+    -t lerobot-workshop .
+```
+
+> При смене базового образа нужно синхронно обновить пины в `docker/constraints.txt` (три строки: `torch`, `torchvision`, `torchaudio`).  
+> Текущие версии можно узнать командой:
+> ```bash
+> python -c "import torch, torchvision, torchaudio; print(torch.__version__, torchvision.__version__, torchaudio.__version__)"
+> ```
+
+### Что входит в образ
+
+| Слой | Содержимое |
+|---|---|
+| Базовый образ | PyTorch + CUDA + cuDNN |
+| Системные пакеты | MuJoCo GL-зависимости, X11, libusb, scrot |
+| Python-зависимости | `requirements-docker.txt` с пинами из `docker/constraints.txt` |
+| Код | Весь репозиторий (`COPY . .`) |
+| Ассеты | `asset.zip` распаковывается в `asset/` при сборке |
+
+### Запуск с GPU и X11 (для рендера MuJoCo)
+
+```bash
+xhost +local:docker
+
+docker run --rm -it --gpus all \
+    --shm-size=16g \
+    -e DISPLAY="$DISPLAY" \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v "$(pwd):/app" \
+    -v "$(pwd)/outputs/hf_cache:/root/.cache/huggingface" \
+    lerobot-workshop bash
+```
+
+---
+
+## 4. Обучение
 
 ### Предобученная база
 
@@ -258,7 +313,7 @@ outputs/train/so101_smolvla_official_main_bs32_lr1e4_noamp/
 
 ---
 
-## 4. Инференс в симуляторе
+## 5. Инференс в симуляторе
 
 ### Одиночный запуск
 
