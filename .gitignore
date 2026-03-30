@@ -20,16 +20,25 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
-# Local datasets / experiment outputs
+# Datasets (все батчи и промежуточные версии — большие бинарные данные)
 demo_data/
+demo_data*/
 demo_data_language/
 .demo_data/
+
+# Выходы обучения, инференса, кэш моделей
+outputs/
 ckpt/
 wandb/
+
+# Архивы и временные файлы
+*.log
 _example_repo/
 
 # Generated assets
 asset/
 
-# OS files
+# MacOS мусор
+__MACOSX
 .DS_Store
+.cursor

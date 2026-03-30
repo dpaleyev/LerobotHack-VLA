@@ -1,6 +1,7 @@
 import os
 import random
 import copy
+import colorsys
 import numpy as np
 import glfw
 import mujoco
@@ -87,6 +88,9 @@ class SimpleEnv:
     def init_viewer(self):
         """Initialize the viewer."""
         self.env.reset()
+        if not self._visible_window:
+            self.env.use_mujoco_viewer = False
+            return
         self.env.init_viewer(
             distance=2.0,
             elevation=-30,
@@ -116,6 +120,21 @@ class SimpleEnv:
                 m.site_pos[sid] = [0.0, 0.0, z]
         mujoco.mj_setConst(m, d)
         mujoco.mj_forward(m, d)
+
+    def _randomize_cube_color(self, rng):
+        """Случайный насыщенный цвет куба (материал cube_wood в cube.xml)."""
+        m = self.env.model
+        mid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_MATERIAL, "cube_wood")
+        if mid < 0:
+            return
+        h = float(rng.uniform(0.0, 1.0))
+        s = float(rng.uniform(0.55, 1.0))
+        v = float(rng.uniform(0.45, 1.0))
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        m.mat_rgba[mid, 0] = r
+        m.mat_rgba[mid, 1] = g
+        m.mat_rgba[mid, 2] = b
+        m.mat_rgba[mid, 3] = 1.0
 
     def reset(self, seed=None):
         """
@@ -151,21 +170,34 @@ class SimpleEnv:
         self.env.forward(q=q_full, joint_names=self.joint_names, increase_tick=False)
 
         # Случайный размер куба (половина ребра), затем позы объектов в зоне досягаемости
-        cube_half = float(rng.uniform(0.01, 0.02))
+        cube_half = float(rng.uniform(0.01, 0.017))
         self._apply_cube_half_extent(cube_half)
+        self._randomize_cube_color(rng)
 
         obj_names = self.env.get_body_names(prefix="body_obj_")
         n_obj = len(obj_names)
-        # SO-101: стол ~0.82; досягаемость ~ x∈[0.18,0.40], y∈[-0.20,0.20] относительно сцены
-        obj_xyzs = sample_xyzs(
-            n_obj,
-            x_range=[0.18, 0.35],
-            y_range=[-0.20, 0.15],
-            z_range=[0.82, 0.82],
-            min_dist=0.14,
-            xy_margin=0.02,
-            rng=rng,
-        )
+        # SO-101: база робота x≈0.06; min safe 2D distance from base = 0.20 m.
+        # x∈[0.22, 0.38], y∈[-0.18, 0.18] → все объекты гарантированно
+        # дальше ~16 см от базы по X и >20 см по 2D-норме.
+        ROBOT_BASE_XY = np.array([0.06, 0.0])
+        MIN_DIST_FROM_BASE = 0.20
+        max_attempts = 200
+        for attempt in range(max_attempts):
+            obj_xyzs = sample_xyzs(
+                n_obj,
+                x_range=[0.22, 0.38],
+                y_range=[-0.18, 0.18],
+                z_range=[0.82, 0.82],
+                min_dist=0.14,
+                xy_margin=0.02,
+                rng=rng,
+            )
+            dists = np.linalg.norm(obj_xyzs[:, :2] - ROBOT_BASE_XY, axis=1)
+            if np.all(dists >= MIN_DIST_FROM_BASE):
+                break
+        else:
+            # fallback — просто используем последний сэмпл
+            pass
 
         for obj_idx in range(n_obj):
             self.env.set_p_base_body(body_name=obj_names[obj_idx], p=obj_xyzs[obj_idx, :])
@@ -300,6 +332,8 @@ class SimpleEnv:
 
     def render(self, teleop=False):
         """Render the environment."""
+        if not self._visible_window or not hasattr(self.env, "viewer"):
+            return
         if not hasattr(self, "rgb_agent") or not hasattr(self, "rgb_ego"):
             self.grab_image()
 
