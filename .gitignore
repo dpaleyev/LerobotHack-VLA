@@ -44,3 +44,5 @@ asset/
 __MACOSX
 .DS_Store
 .cursor
+
+sim_data/

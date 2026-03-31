@@ -9,10 +9,10 @@ class CollectDataConfig:
     seed: int | None = 0
     repo_name: str = "so101_pnp"
     num_demo: int = 30
-    root: Path = Path("./demo_data4")
+    root: Path = Path("./sim_data")
     use_master_arm: bool = True
     leader_port: str = "/dev/ttyACM0"
-    leader_id: str = "None"
+    leader_id: str = "my_leader"
     motion_threshold: float = 0.03
     task_name: str = "Put cube on plate"
     xml_path: str = "./asset/example_scene_y.xml"

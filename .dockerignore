@@ -1,0 +1,11 @@
+.venv/
+outputs/
+sim_data/
+demo_data*/
+__pycache__/
+*.pyc
+.git/
+.github/
+*.egg-info/
+*.ipynb_checkpoints/
+*.ipynb

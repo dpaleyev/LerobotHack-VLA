@@ -18,4 +18,4 @@ exec docker run --rm --gpus all \
   -v "$HF_CACHE_DIR:/root/.cache/huggingface" \
   -w /app \
   "$IMAGE_NAME" \
-  python -m lerobot.scripts.train "$@"
+  lerobot-train "$@"

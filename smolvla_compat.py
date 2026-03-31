@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from huggingface_hub import hf_hub_download
 
-from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
+from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
 
 

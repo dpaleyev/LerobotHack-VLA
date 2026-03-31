@@ -5,11 +5,11 @@ pyautogui
 matplotlib
 scipy
 safetensors==0.5.3
-datasets==3.4.1
+datasets>=4.0.0,<5.0.0
 torch==2.6.0
 torchvision==0.21.0
 torchaudio==2.6.0
-transformers==4.50.3
-lerobot[feetech] @ git+https://github.com/huggingface/lerobot.git@10b7b3532543b4adfb65760f02a49b4c537afde7
+transformers>=5.3.0,<6.0.0
+lerobot[feetech,smolvla] @ git+https://github.com/huggingface/lerobot.git@main
 jupyter
 glfw

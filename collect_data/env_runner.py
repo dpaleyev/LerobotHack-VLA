@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import glfw
 import numpy as np
 from PIL import Image
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from mujoco_env.y_env import SimpleEnv
 
 from .config import CollectDataConfig
@@ -54,7 +54,7 @@ def create_or_load_dataset(config: CollectDataConfig) -> LeRobotDataset:
                 "observation.wrist_image": {
                     "dtype": "image",
                     "shape": (480, 640, 3),
-                    "names": ["height", "width", "channel"],
+                    "names": ["height", "width", "channels"],
                 },
                 "observation.state": {
                     "dtype": "float32",
@@ -123,8 +123,8 @@ def collect_demonstrations(config: CollectDataConfig, env: SimpleEnv, dataset: L
                     "observation.state": ee_pose,
                     "action": commanded_q,
                     "obj_init": env.obj_init_pose,
-                },
-                task=config.task_name,
+                    "task": config.task_name,
+                }
             )
             state.recorded_frames += 1
 

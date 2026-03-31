@@ -1,6 +1,6 @@
 # Должен совпадать с torch/torchvision/torchaudio в выбранном образе pytorch/pytorch:*.
-# Дефолт: pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+# Дефолт: pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 # Сменили BASE_IMAGE — обновите три строки (версии: python -c "import torch,torchvision,torchaudio; print(torch.__version__, ...)")
-torch==2.7.0
-torchvision==0.22.0
-torchaudio==2.7.0
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0

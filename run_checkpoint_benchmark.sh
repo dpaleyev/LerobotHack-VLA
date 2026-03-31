@@ -3,6 +3,11 @@ set -euo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HF_CACHE_DIR="${HF_CACHE_DIR:-$WORKSPACE_DIR/outputs/hf_cache}"
+# Must match where checkpoints live; run_smolvla_inference.py defaults to ...noamp (no _2).
+TRAIN_RUN_REL="${TRAIN_RUN_REL:-outputs/train/so101_smolvla_official_main_bs32_lr1e4_noamp_2}"
+TRAIN_RUN_DIR="${TRAIN_RUN_DIR:-$WORKSPACE_DIR/$TRAIN_RUN_REL}"
+# Inside Docker (-w /app) we must pass a path under the mount, not the host absolute path.
+TRAIN_RUN_DOCKER="$(realpath --relative-to="$WORKSPACE_DIR" "$TRAIN_RUN_DIR")"
 IMAGE_NAME="${IMAGE_NAME:-lerobot-workshop:latest}"
 CHECKPOINTS="${CHECKPOINTS:-1000 2000 3000 4000 5000 6000 7000}"
 EPISODES="${EPISODES:-20}"
@@ -22,12 +27,13 @@ echo "  max_steps:   $MAX_STEPS"
 echo "  seed:        $SEED"
 echo "  DISPLAY:     ${DISPLAY:-<not set>}"
 echo "  out_dir:     $OUT_DIR"
+echo "  train_run:   $TRAIN_RUN_DIR"
 echo "  checkpoints: $CHECKPOINTS"
 echo "============================================================"
 
 for STEP in $CHECKPOINTS; do
     STEP_PAD=$(printf "%06d" "$STEP")
-    CKPT_PATH="$WORKSPACE_DIR/outputs/train/so101_smolvla_official_main_bs32_lr1e4_noamp/checkpoints/$STEP_PAD/pretrained_model"
+    CKPT_PATH="$TRAIN_RUN_DIR/checkpoints/$STEP_PAD/pretrained_model"
     SUMMARY_PATH="/app/outputs/eval/benchmark_${EPISODES}scenes_steps${MAX_STEPS}/ckpt_${STEP_PAD}.json"
     LOCAL_SUMMARY="$OUT_DIR/ckpt_${STEP_PAD}.json"
 
@@ -66,6 +72,7 @@ for STEP in $CHECKPOINTS; do
         -w /app \
         "$IMAGE_NAME" \
         python run_smolvla_inference.py \
+            --train-run-dir "$TRAIN_RUN_DOCKER" \
             --checkpoint-step "$STEP" \
             --episodes "$EPISODES" \
             --max-steps "$MAX_STEPS" \

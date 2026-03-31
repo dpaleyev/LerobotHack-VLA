@@ -1,16 +1,14 @@
-# SmolVLA + MuJoCo. Ожидаем официальные образы pytorch/pytorch:* (torch + torchvision + torchaudio).
+# SmolVLA + MuJoCo training/inference container.
+# Python 3.12 required by lerobot>=0.5.0; official pytorch images ship 3.11,
+# so we install 3.12 from deadsnakes and reinstall torch from pip.
 #
-# Сборка по умолчанию:
+# Сборка:
 #   docker build -t lerobot-workshop .
-#
-# Другой тег того же семейства:
-#   docker build --build-arg BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime -t lerobot-workshop .
-#   и синхронно поправьте docker/constraints.txt под версии из этого тега.
 #
 # Запуск с GPU и окном (Linux):
 #   docker run --rm -it --gpus all -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix lerobot-workshop
 
-ARG BASE_IMAGE=pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+ARG BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 
 FROM ${BASE_IMAGE}
 
@@ -20,11 +18,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common gpg-agent \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 python3.12-venv python3.12-dev python3.12-tk \
     build-essential \
     git \
     unzip \
     libgl1 \
     libglu1-mesa \
+    libosmesa6 \
     libglfw3 \
     libglib2.0-0 \
     libsm6 \
@@ -41,16 +44,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     scrot \
     && rm -rf /var/lib/apt/lists/*
 
+# Create a clean Python 3.12 venv (sidesteps conda 3.11 entirely)
+RUN python3.12 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip setuptools wheel \
+    && python --version && pip --version
+
 WORKDIR /app
 
 COPY requirements-docker.txt ./
-COPY docker/constraints.txt docker/constraints.txt
 
-RUN python -c "import torch; print('base torch:', torch.__version__)" \
-    && pip install --upgrade pip setuptools wheel \
-    && pip install -r requirements-docker.txt -c docker/constraints.txt
+RUN pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+        --index-url https://download.pytorch.org/whl/cu128 \
+    && pip install -r requirements-docker.txt
 
-RUN python -c "import mujoco, torch, torchvision, torchaudio, lerobot, transformers; print('ok:', torch.__version__)"
+RUN python -c "import sys; print('python:', sys.version)" \
+    && python -c "import torch; print('torch:', torch.__version__, 'cuda:', torch.cuda.is_available())" \
+    && python -c "import lerobot; print('lerobot:', lerobot.__version__)" \
+    && python -c "import mujoco; print('mujoco:', mujoco.__version__)"
 
 COPY . .
 

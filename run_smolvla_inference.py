@@ -14,8 +14,9 @@ from PIL import Image
 from torchvision.transforms import ToTensor
 
 from collect_data.config import default_config
-from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from lerobot.policies.factory import make_pre_post_processors
 from lerobot.configs.types import FeatureType
 from smolvla_compat import load_smolvla_config
 from smolvla_defaults import (
@@ -168,8 +169,6 @@ def load_policy(model_path: Path, dataset_root: Path, dataset_repo_id: str, devi
     ds_meta = LeRobotDatasetMetadata(dataset_repo_id, root=str(dataset_root))
     cfg = load_smolvla_config(model_path, device=device)
     if model_path.is_dir() and cfg.load_vlm_weights:
-        # For local checkpoints, load the full policy state from model.safetensors
-        # instead of re-initializing the base VLM from the Hub first.
         cfg.load_vlm_weights = False
     policy = SmolVLAPolicy.from_pretrained(
         str(model_path),
@@ -181,7 +180,25 @@ def load_policy(model_path: Path, dataset_root: Path, dataset_repo_id: str, devi
         policy.float()
     policy.to(device)
     policy.eval()
-    return policy, cfg
+
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg,
+        pretrained_path=str(model_path),
+        preprocessor_overrides={
+            "device_processor": {"device": device.type},
+            "normalizer_processor": {
+                "stats": ds_meta.stats,
+                "features": {**cfg.input_features, **cfg.output_features},
+            },
+        },
+        postprocessor_overrides={
+            "unnormalizer_processor": {
+                "stats": ds_meta.stats,
+                "features": {**cfg.input_features, **cfg.output_features},
+            },
+        },
+    )
+    return policy, cfg, preprocessor, postprocessor
 
 
 def visual_source_for_key(key: str) -> str | None:
@@ -276,6 +293,8 @@ def make_observation(
 def run_episode(
     env,
     policy: SmolVLAPolicy,
+    preprocessor,
+    postprocessor,
     task: str,
     visual_specs: list[VisualFeatureSpec],
     fps: int,
@@ -292,8 +311,10 @@ def run_episode(
             continue
 
         obs = make_observation(env, task, visual_specs, device)
+        obs = preprocessor(obs)
         with torch.no_grad():
             action = policy.select_action(obs)
+        action = postprocessor(action)
         action_np = action.squeeze(0).detach().cpu().numpy().astype(np.float32)
         env.step(action_np)
 
@@ -329,7 +350,7 @@ def main():
     print(f"Task: {args.task}")
     print(f"Headless: {args.headless}")
 
-    policy, model_cfg = load_policy(
+    policy, model_cfg, preprocessor, postprocessor = load_policy(
         artifacts.policy_path,
         artifacts.dataset_root,
         artifacts.dataset_repo_id,
@@ -358,6 +379,8 @@ def main():
         result = run_episode(
             env=env,
             policy=policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
             task=args.task,
             visual_specs=visual_specs,
             fps=args.fps,

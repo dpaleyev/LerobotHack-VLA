@@ -23,7 +23,7 @@ LerobotHack-VLA/
 ├── filter_demo_dataset_by_badness.py  # фильтрация по badness_score      ⚠️ не протестирован
 ├── trim_demo_dataset_start.py  # обрезка первых N кадров эпизода         ⚠️ не протестирован
 │
-├── run_official_smolvla_train_cached.sh  # обёртка docker run → lerobot.scripts.train
+├── run_official_smolvla_train_cached.sh  # обёртка docker run → lerobot.scripts.lerobot_train
 ├── run_smolvla_inference.py    # инференс в симуляторе
 ├── run_checkpoint_benchmark.sh # прогон по всем чекпоинтам, таблица метрик
 │
@@ -67,7 +67,7 @@ LerobotHack-VLA/
 ### Запуск сбора
 
 ```bash
-python -m collect_data
+python -m collect_data.run
 ```
 
 **Клавиши в окне симулятора:**
@@ -284,7 +284,7 @@ outputs/models/lerobot_smolvla_base_sanitized_lr1e4/
     --num_workers=4
 ```
 
-Скрипт — тонкая обёртка над `python -m lerobot.scripts.train` внутри контейнера `lerobot-workshop:latest`.  
+Скрипт — тонкая обёртка над `python -m lerobot.scripts.lerobot_train` внутри контейнера `lerobot-workshop:latest`.  
 Пути `/app/...` внутри контейнера = корень репозитория снаружи.  
 HuggingFace-кэш монтируется из `outputs/hf_cache/` — веса **не скачиваются повторно**.
 
