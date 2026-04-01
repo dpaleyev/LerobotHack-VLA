@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import mujoco
 import numpy as np
 import torch
 from PIL import Image
@@ -53,6 +54,26 @@ class InferenceArtifacts:
     dataset_repo_id: str
 
 
+@dataclasses.dataclass(frozen=True)
+class NumericFeatureContract:
+    state_unit: str
+    action_unit: str
+
+
+JOINT_POSITION_NAMES = (
+    "shoulder_pan.pos",
+    "shoulder_lift.pos",
+    "elbow_flex.pos",
+    "wrist_flex.pos",
+    "wrist_roll.pos",
+    "gripper.pos",
+)
+GRIPPER_MIN_RAD = -0.17453
+GRIPPER_MAX_RAD = 1.74533
+GRIPPER_MIN_REAL = 0.0
+GRIPPER_MAX_REAL = 100.0
+
+
 def parse_args():
     cfg = default_config()
     parser = argparse.ArgumentParser(description="SmolVLA inference in MuJoCo.")
@@ -70,6 +91,24 @@ def parse_args():
     parser.add_argument("--max-steps", type=int, default=250)
     parser.add_argument("--device", default=None)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument(
+        "--action-alpha",
+        type=float,
+        default=1.0,
+        help="EMA coefficient for action smoothing. 1.0 disables smoothing.",
+    )
+    parser.add_argument(
+        "--max-joint-step-deg",
+        type=float,
+        default=None,
+        help="Maximum per-step change for arm joints in degrees.",
+    )
+    parser.add_argument(
+        "--max-gripper-step",
+        type=float,
+        default=None,
+        help="Maximum per-step change for gripper command in radians.",
+    )
     parser.add_argument("--summary-path", type=Path, default=None)
     return parser.parse_args()
 
@@ -201,6 +240,47 @@ def load_policy(model_path: Path, dataset_root: Path, dataset_repo_id: str, devi
     return policy, cfg, preprocessor, postprocessor
 
 
+def load_json_if_exists(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def infer_numeric_contract(dataset_root: Path) -> NumericFeatureContract:
+    info = load_json_if_exists(dataset_root / "meta" / "info.json") or {}
+    stats = load_json_if_exists(dataset_root / "meta" / "stats.json") or {}
+    features = info.get("features", {})
+
+    state_names = tuple(features.get(STATE_KEY, {}).get("names") or ())
+    action_names = tuple(features.get(ACTION_KEY, {}).get("names") or ())
+
+    if state_names != JOINT_POSITION_NAMES or action_names != JOINT_POSITION_NAMES:
+        raise ValueError(
+            "Dataset numeric contract is not canonical so_follower joint .pos. "
+            "Expected observation.state/action names to match JOINT_POSITION_NAMES."
+        )
+
+    def infer_unit(feature_key: str) -> str:
+        feature_stats = stats.get(feature_key, {})
+        mins = np.asarray(feature_stats.get("min", []), dtype=np.float32).reshape(-1)
+        maxs = np.asarray(feature_stats.get("max", []), dtype=np.float32).reshape(-1)
+        if mins.size == 0 and maxs.size == 0:
+            return "radians"
+        abs_max = float(np.max(np.concatenate([np.abs(mins), np.abs(maxs)])))
+        return "degrees" if abs_max > 10.0 else "radians"
+
+    state_unit = infer_unit(STATE_KEY)
+    action_unit = infer_unit(ACTION_KEY)
+
+    if action_unit == "degrees":
+        state_unit = "degrees"
+
+    return NumericFeatureContract(
+        state_unit=state_unit,
+        action_unit=action_unit,
+    )
+
+
 def visual_source_for_key(key: str) -> str | None:
     if key in FRONT_CAMERA_KEYS:
         return "front"
@@ -235,7 +315,7 @@ def validate_feature_contract(model_cfg) -> list[VisualFeatureSpec]:
             if shape != EXPECTED_STATE_SHAPE:
                 raise ValueError(
                     f"Unsupported state feature shape for {key}: {shape}. "
-                    f"Expected {EXPECTED_STATE_SHAPE} from SimpleEnv.get_ee_pose()."
+                    f"Expected {EXPECTED_STATE_SHAPE} for canonical 6D state."
                 )
             continue
 
@@ -261,13 +341,52 @@ def validate_feature_contract(model_cfg) -> list[VisualFeatureSpec]:
     return visual_specs
 
 
+def _grab_images_with_offscreen_renderer(env) -> tuple[np.ndarray, np.ndarray]:
+    """Headless-safe camera capture when MuJoCo viewer is unavailable."""
+    renderers = getattr(env, "_offscreen_renderers", None)
+    if renderers is None:
+        # Match the dataset camera aspect; exact size is resized later per feature spec.
+        renderers = {
+            "front": mujoco.Renderer(env.env.model, height=480, width=640),
+            "side": mujoco.Renderer(env.env.model, height=480, width=640),
+        }
+        setattr(env, "_offscreen_renderers", renderers)
+
+    front_renderer = renderers["front"]
+    side_renderer = renderers["side"]
+    front_renderer.update_scene(env.env.data, camera=env.agent_cam_name)
+    side_renderer.update_scene(env.env.data, camera=env.ego_cam_name)
+    front_rgb = front_renderer.render().copy()
+    side_rgb = side_renderer.render().copy()
+    return front_rgb, side_rgb
+
+
+def _map_gripper_rad_to_real(gripper_rad: float) -> float:
+    gripper_rad = float(np.clip(gripper_rad, GRIPPER_MIN_RAD, GRIPPER_MAX_RAD))
+    alpha = (gripper_rad - GRIPPER_MIN_RAD) / (GRIPPER_MAX_RAD - GRIPPER_MIN_RAD)
+    return float(alpha * (GRIPPER_MAX_REAL - GRIPPER_MIN_REAL) + GRIPPER_MIN_REAL)
+
+
+def _map_gripper_real_to_rad(gripper_real: float) -> float:
+    gripper_real = float(np.clip(gripper_real, GRIPPER_MIN_REAL, GRIPPER_MAX_REAL))
+    alpha = (gripper_real - GRIPPER_MIN_REAL) / (GRIPPER_MAX_REAL - GRIPPER_MIN_REAL)
+    return float(alpha * (GRIPPER_MAX_RAD - GRIPPER_MIN_RAD) + GRIPPER_MIN_RAD)
+
+
 def make_observation(
     env,
     task: str,
     visual_specs: list[VisualFeatureSpec],
     device: torch.device,
+    numeric_contract: NumericFeatureContract,
 ) -> dict[str, torch.Tensor | list[str]]:
-    front, side = env.grab_image()
+    try:
+        front, side = env.grab_image()
+    except AttributeError as exc:
+        # In headless mode SimpleEnv skips viewer init; use offscreen renderer instead.
+        if "viewer" not in str(exc):
+            raise
+        front, side = _grab_images_with_offscreen_renderer(env)
     to_tensor = ToTensor()
     resized_cache: dict[tuple[str, int, int], torch.Tensor] = {}
     obs: dict[str, torch.Tensor | list[str]] = {"task": [task]}
@@ -286,8 +405,40 @@ def make_observation(
 
         obs[spec.key] = tensor.unsqueeze(0).to(device)
 
-    obs[STATE_KEY] = torch.tensor(env.get_ee_pose(), dtype=torch.float32).unsqueeze(0).to(device)
+    state = env.get_joint_state()
+
+    if numeric_contract.state_unit == "degrees":
+        state = np.asarray(state, dtype=np.float32)
+        state[:5] = np.rad2deg(state[:5]).astype(np.float32)
+        state[5] = _map_gripper_rad_to_real(float(state[5]))
+
+    obs[STATE_KEY] = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
     return obs
+
+
+def stabilize_action(
+    action: np.ndarray,
+    previous_action: np.ndarray,
+    action_alpha: float,
+    max_joint_step: float | None,
+    max_gripper_step: float | None,
+) -> np.ndarray:
+    action = np.asarray(action, dtype=np.float32)
+    previous_action = np.asarray(previous_action, dtype=np.float32)
+
+    if not (0.0 < action_alpha <= 1.0):
+        raise ValueError(f"--action-alpha must be in (0, 1], got {action_alpha}")
+
+    if action_alpha < 1.0:
+        action = action_alpha * action + (1.0 - action_alpha) * previous_action
+
+    delta = action - previous_action
+    if max_joint_step is not None:
+        delta[:-1] = np.clip(delta[:-1], -max_joint_step, max_joint_step)
+    if max_gripper_step is not None:
+        delta[-1] = np.clip(delta[-1], -max_gripper_step, max_gripper_step)
+
+    return (previous_action + delta).astype(np.float32)
 
 
 def run_episode(
@@ -301,21 +452,38 @@ def run_episode(
     max_steps: int,
     device: torch.device,
     render: bool,
+    numeric_contract: NumericFeatureContract,
+    action_alpha: float,
+    max_joint_step: float | None,
+    max_gripper_step: float | None,
 ) -> dict[str, int | bool]:
     policy.reset()
     control_step = 0
+    previous_action = np.asarray(env.q, dtype=np.float32).copy()
 
     while control_step < max_steps:
         env.step_env()
         if not env.env.loop_every(HZ=fps):
             continue
 
-        obs = make_observation(env, task, visual_specs, device)
+        obs = make_observation(env, task, visual_specs, device, numeric_contract)
         obs = preprocessor(obs)
         with torch.no_grad():
             action = policy.select_action(obs)
         action = postprocessor(action)
         action_np = action.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        if numeric_contract.action_unit == "degrees":
+            action_np = np.asarray(action_np, dtype=np.float32)
+            action_np[:5] = np.deg2rad(action_np[:5]).astype(np.float32)
+            action_np[5] = _map_gripper_real_to_rad(float(action_np[5]))
+        action_np = stabilize_action(
+            action=action_np,
+            previous_action=previous_action,
+            action_alpha=action_alpha,
+            max_joint_step=max_joint_step,
+            max_gripper_step=max_gripper_step,
+        )
+        previous_action = action_np.copy()
         env.step(action_np)
 
         if render:
@@ -336,6 +504,9 @@ def main():
     device = get_device(args.device)
     collect_cfg = default_config()
     artifacts = resolve_artifacts(args)
+    max_joint_step = (
+        None if args.max_joint_step_deg is None else np.deg2rad(args.max_joint_step_deg)
+    )
 
     if args.headless:
         os.environ["MUJOCO_GLFW_VISIBLE"] = "0"
@@ -349,6 +520,12 @@ def main():
     print(f"Dataset repo id: {artifacts.dataset_repo_id}")
     print(f"Task: {args.task}")
     print(f"Headless: {args.headless}")
+    print(
+        "Action stabilization:",
+        f"alpha={args.action_alpha},",
+        f"max_joint_step_deg={args.max_joint_step_deg},",
+        f"max_gripper_step={args.max_gripper_step}",
+    )
 
     policy, model_cfg, preprocessor, postprocessor = load_policy(
         artifacts.policy_path,
@@ -357,12 +534,19 @@ def main():
         device,
     )
     visual_specs = validate_feature_contract(model_cfg)
+    numeric_contract = infer_numeric_contract(artifacts.dataset_root)
     print(
         "Policy config:",
         f"chunk_size={model_cfg.chunk_size},",
         f"n_action_steps={model_cfg.n_action_steps},",
         f"empty_cameras={model_cfg.empty_cameras},",
         f"visual_keys={[spec.key for spec in visual_specs]}",
+    )
+    print(
+        "Numeric contract:",
+        "state_source=joint_state,",
+        f"state_unit={numeric_contract.state_unit},",
+        f"action_unit={numeric_contract.action_unit}",
     )
 
     env = SimpleEnv(
@@ -387,6 +571,10 @@ def main():
             max_steps=args.max_steps,
             device=device,
             render=not args.headless,
+            numeric_contract=numeric_contract,
+            action_alpha=args.action_alpha,
+            max_joint_step=max_joint_step,
+            max_gripper_step=args.max_gripper_step,
         )
         results.append(result)
         status = "SUCCESS" if result["success"] else "TIMEOUT"
@@ -398,6 +586,7 @@ def main():
         "train_config_path": str(artifacts.train_config_path) if artifacts.train_config_path else None,
         "dataset_root": str(artifacts.dataset_root),
         "dataset_repo_id": artifacts.dataset_repo_id,
+        "numeric_contract": dataclasses.asdict(numeric_contract),
         "task": args.task,
         "episodes": args.episodes,
         "successes": success_count,

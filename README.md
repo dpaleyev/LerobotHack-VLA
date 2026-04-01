@@ -81,9 +81,11 @@ pip install -r requirements.txt
 ## Актуальный пайплайн
 
 - Симулятор теперь сразу пишет датасеты в real-совместимом формате: `so_follower`, `10 fps`, камеры `observation.images.front` / `observation.images.side`, видео `h264`.
+- Канонический numeric-контракт (как в `lerobot-record` для `so_follower`): `observation.state` и `action` это одни и те же 6 joint-каналов `*.pos` (`shoulder_pan ... gripper`), где суставы в градусах, а gripper в шкале `0..100`.
 - Актуальный merged train-датасет: `final-dataset/`.
 - `run_official_smolvla_train_cached.sh` теперь сам добавляет нужные train-флаги для `final-dataset`: `rename_map`, `policy.empty_cameras=1`, `dataset.video_backend=pyav`, `policy.push_to_hub=false`.
 - Для запуска обучения на `A100` с mixed precision используйте `run_official_smolvla_train_cached_amp.sh`.
+- Устаревшие маршруты конвертации state-контракта перечислены в `DATASET_FORMAT_DEPRECATIONS.md`.
 
 ## Ссылки
 

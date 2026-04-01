@@ -26,6 +26,10 @@ REQUIRED_FEATURE_KEYS = {
     "observation.state",
     "action",
 }
+GRIPPER_MIN_RAD = -0.17453
+GRIPPER_MAX_RAD = 1.74533
+GRIPPER_MIN_REAL = 0.0
+GRIPPER_MAX_REAL = 100.0
 
 
 @dataclass(slots=True)
@@ -100,10 +104,23 @@ def create_or_load_dataset(config: CollectDataConfig) -> LeRobotDataset:
 
     info = json.loads(info_path.read_text())
     existing_keys = set(info.get("features", {}))
+    state_feature = info.get("features", {}).get("observation.state", {})
+    action_feature = info.get("features", {}).get("action", {})
+    state_names = list(state_feature.get("names") or [])
+    action_names = list(action_feature.get("names") or [])
+    state_shape = tuple(int(x) for x in (state_feature.get("shape") or ()))
+    action_shape = tuple(int(x) for x in (action_feature.get("shape") or ()))
+
     if info.get("robot_type") != "so_follower" or not REQUIRED_FEATURE_KEYS.issubset(existing_keys):
         raise ValueError(
             "Существующий датасет записан в старом формате и несовместим с новой схемой записи. "
             "Удалите папку и создайте датасет заново, либо продолжайте писать в новый root."
+        )
+    if state_shape != (6,) or action_shape != (6,) or state_names != JOINT_NAMES or action_names != JOINT_NAMES:
+        raise ValueError(
+            "Существующий датасет не соответствует canonical lerobot-record контракту "
+            "для SO follower (state/action должны быть joint .pos, shape=(6,)). "
+            "Используйте новый root для записи."
         )
 
     return LeRobotDataset.resume(
@@ -145,20 +162,20 @@ def collect_demonstrations(config: CollectDataConfig, env: SimpleEnv, dataset: L
             state.recorded_frames = 0
             print("Начинаю запись")
 
-        ee_pose = env.get_ee_pose()
+        joint_state = _state_in_real_units(env)
         agent_image, wrist_image = env.grab_image()
         agent_image = _resize_image(agent_image, config.image_size)
         wrist_image = _resize_image(wrist_image, config.image_size)
 
         env.step(state.action)
-        commanded_q = np.asarray(env.q, dtype=np.float32).copy()
+        commanded_q = _action_in_real_units(np.asarray(env.q, dtype=np.float32).copy())
 
         if state.record_flag:
             dataset.add_frame(
                 {
                     "observation.images.front": agent_image,
                     "observation.images.side": wrist_image,
-                    "observation.state": ee_pose,
+                    "observation.state": joint_state,
                     "action": commanded_q,
                     "task": config.task_name,
                 }
@@ -187,6 +204,29 @@ def close_env(env: SimpleEnv) -> None:
 
 def _resize_image(image: np.ndarray, image_size: tuple[int, int]) -> np.ndarray:
     return np.array(Image.fromarray(image).resize(image_size))
+
+
+def _map_gripper_rad_to_real(gripper_rad: float) -> float:
+    gripper_rad = float(np.clip(gripper_rad, GRIPPER_MIN_RAD, GRIPPER_MAX_RAD))
+    alpha = (gripper_rad - GRIPPER_MIN_RAD) / (GRIPPER_MAX_RAD - GRIPPER_MIN_RAD)
+    return float(alpha * (GRIPPER_MAX_REAL - GRIPPER_MIN_REAL) + GRIPPER_MIN_REAL)
+
+
+def _state_in_real_units(env: SimpleEnv) -> np.ndarray:
+    # Canonical so_follower units:
+    # joints in degrees + gripper in 0..100 range.
+    arm_rad = np.asarray(env.env.get_qpos_joints(joint_names=env.arm_joint_names), dtype=np.float32)
+    arm_deg = np.rad2deg(arm_rad).astype(np.float32)
+    gripper_rad = float(env._get_gripper_q())
+    gripper_real = _map_gripper_rad_to_real(gripper_rad)
+    return np.concatenate([arm_deg, np.array([gripper_real], dtype=np.float32)], dtype=np.float32)
+
+
+def _action_in_real_units(action_rad: np.ndarray) -> np.ndarray:
+    action_rad = np.asarray(action_rad, dtype=np.float32)
+    arm_deg = np.rad2deg(action_rad[:-1]).astype(np.float32)
+    gripper_real = _map_gripper_rad_to_real(float(action_rad[-1]))
+    return np.concatenate([arm_deg, np.array([gripper_real], dtype=np.float32)], dtype=np.float32)
 
 
 def _reset_scene(config: CollectDataConfig, env: SimpleEnv, dataset: LeRobotDataset, controller, state: SessionState) -> None:

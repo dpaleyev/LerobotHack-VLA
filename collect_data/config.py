@@ -9,7 +9,7 @@ class CollectDataConfig:
     seed: int | None = 0
     repo_name: str = "so101_pnp"
     num_demo: int = 150
-    root: Path = Path("./simulation_data")
+    root: Path = Path("./simulation_data_fixed")
     use_master_arm: bool = True
     leader_port: str = "/dev/ttyACM0"
     leader_id: str = "my_leader"
@@ -25,6 +25,14 @@ class CollectDataConfig:
     metadata_buffer_size: int = 10
     streaming_encoding: bool = True
     encoder_threads: int | None = None
+    state_contract: str = "joint_pos"
+
+    def __post_init__(self) -> None:
+        if self.state_contract != "joint_pos":
+            raise ValueError(
+                "CollectDataConfig.state_contract поддерживает только canonical значение "
+                "'joint_pos' (совместимо с lerobot-record / so_follower)."
+            )
 
     @property
     def action_type(self) -> str:

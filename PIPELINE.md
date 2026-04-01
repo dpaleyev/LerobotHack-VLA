@@ -85,6 +85,8 @@ python -m collect_data.run
 Новые симуляционные датасеты сразу пишутся в том же формате, что и real-датасеты:
 - `robot_type=so_follower`
 - камеры `observation.images.front` и `observation.images.side`
+- `observation.state` и `action` хранят только канонические joint `.pos` значения (6-dim):
+  суставы в **градусах**, gripper в шкале **0..100**
 - видео в `h264`
 - без дополнительной пост-конвертации после записи
 
@@ -96,7 +98,7 @@ python -m collect_data.run
 
 > **Финальный датасет: `final-dataset/`**  
 > 400 эпизодов · 50 337 кадров · 10 fps  
-> Признаки: `observation.images.front`, `observation.images.side`, `observation.state` (6-dim), `action` (6-dim)
+> Признаки: `observation.images.front`, `observation.images.side`, `observation.state` (6 joint `.pos`), `action` (6 joint `.pos`)
 
 Датасет собран из `real-home` и `simulation_10fps_realfmt` и уже совместим с train-обёрткой проекта.
 
@@ -115,6 +117,7 @@ python merge_demo_datasets.py \
 ### Опциональная обработка (скрипты не протестированы)
 
 > ⚠️ Скрипты ниже **не проверялись** на текущей версии датасета и пайплайна. Использовать с осторожностью.
+> Устаревшие numeric/state маршруты отмечены в `DATASET_FORMAT_DEPRECATIONS.md`.
 
 **Анализ качества эпизодов** — считает `badness_score` и строит отчёт:
 
