@@ -11,7 +11,7 @@
 
 ## Установка
 
-> **Важно:** проект закреплён на `lerobot==0.5.0` через `requirements.txt`.  
+> **Важно:** `requirements.txt` тянет актуальный `lerobot` из `huggingface/lerobot@main`.  
 > Устанавливайте зависимости только через `./install.sh` или `pip install -r requirements.txt`.
 
 ```bash
@@ -77,6 +77,13 @@ pip install -r requirements.txt
 | O / L | wrist_roll (вращение запястья) ± |
 | Пробел | Переключить захват |
 | Z | Сброс эпизода |
+
+## Актуальный пайплайн
+
+- Симулятор теперь сразу пишет датасеты в real-совместимом формате: `so_follower`, `10 fps`, камеры `observation.images.front` / `observation.images.side`, видео `h264`.
+- Актуальный merged train-датасет: `final-dataset/`.
+- `run_official_smolvla_train_cached.sh` теперь сам добавляет нужные train-флаги для `final-dataset`: `rename_map`, `policy.empty_cameras=1`, `dataset.video_backend=pyav`, `policy.push_to_hub=false`.
+- Для запуска обучения на `A100` с mixed precision используйте `run_official_smolvla_train_cached_amp.sh`.
 
 ## Ссылки
 

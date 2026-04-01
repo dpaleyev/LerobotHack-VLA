@@ -54,15 +54,17 @@ LerobotHack-VLA/
 | Параметр | Значение по умолчанию | Описание |
 |---|---|---|
 | `repo_name` | `"so101_pnp"` | Имя датасета (LeRobot repo_id) |
-| `num_demo` | `30` | Сколько эпизодов записать |
-| `root` | `./demo_data4` | Папка, куда сохраняется датасет |
+| `num_demo` | `150` | Сколько эпизодов записать |
+| `root` | `./simulation_data` | Папка, куда сохраняется датасет |
 | `use_master_arm` | `True` | Управление мастер-рукой (`False` → клавиатура) |
 | `leader_port` | `/dev/ttyACM0` | Порт мастер-руки |
 | `motion_threshold` | `0.03` | Минимальное движение для старта записи |
 | `task_name` | `"Put cube on plate"` | Текстовый промпт задачи |
 | `xml_path` | `./asset/example_scene_y.xml` | MuJoCo сцена |
-| `fps` | `20` | Частота записи |
+| `fps` | `10` | Частота записи |
 | `image_size` | `(640, 480)` | Размер кадра в пикселях (W × H) |
+| `vcodec` | `"h264"` | Кодек видео для новых датасетов |
+| `streaming_encoding` | `True` | Кодировать видео сразу во время записи |
 
 ### Запуск сбора
 
@@ -80,17 +82,23 @@ python -m collect_data.run
 
 Запись начинается автоматически как только мастер-рука делает движение выше `motion_threshold`.
 
+Новые симуляционные датасеты сразу пишутся в том же формате, что и real-датасеты:
+- `robot_type=so_follower`
+- камеры `observation.images.front` и `observation.images.side`
+- видео в `h264`
+- без дополнительной пост-конвертации после записи
+
 ---
 
 ## 2. Подготовка датасета
 
 ### Актуальный датасет
 
-> **Финальный датасет: `demo_data_merged_draft_hf/`**  
-> 262 эпизода · 113 201 кадр · 20 fps  
-> Признаки: `observation.image`, `observation.wrist_image`, `observation.state` (6-dim), `action` (6-dim)
+> **Финальный датасет: `final-dataset/`**  
+> 400 эпизодов · 50 337 кадров · 10 fps  
+> Признаки: `observation.images.front`, `observation.images.side`, `observation.state` (6-dim), `action` (6-dim)
 
-Датасет используется **без какой-либо обработки и фильтрации** — собран, слит и сразу отправлен на обучение.
+Датасет собран из `real-home` и `simulation_10fps_realfmt` и уже совместим с train-обёрткой проекта.
 
 ### Слияние батчей
 
@@ -206,7 +214,7 @@ python trim_demo_dataset_start.py \
 docker build -t lerobot-workshop .
 ```
 
-Базовый образ по умолчанию: `pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime`.  
+Базовый образ по умолчанию: `pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime`.  
 Чтобы использовать другой тег PyTorch:
 
 ```bash
@@ -270,12 +278,12 @@ outputs/models/lerobot_smolvla_base_sanitized_lr1e4/
 ```bash
 ./run_official_smolvla_train_cached.sh \
     --policy.path=/app/outputs/models/lerobot_smolvla_base_sanitized_lr1e4 \
-    --dataset.repo_id=so101_pnp \
-    --dataset.root=/app/demo_data_merged_draft_hf \
+    --dataset.repo_id=final-dataset \
+    --dataset.root=/app/final-dataset \
     --batch_size=32 \
     --steps=20000 \
-    --output_dir=/app/outputs/train/so101_smolvla_official_main_bs32_lr1e4_noamp \
-    --job_name=so101_smolvla_official_main_bs32_lr1e4_noamp \
+    --output_dir=/app/outputs/train/final_dataset_main \
+    --job_name=final_dataset_main \
     --policy.device=cuda \
     --policy.use_amp=false \
     --wandb.enable=false \
@@ -287,6 +295,31 @@ outputs/models/lerobot_smolvla_base_sanitized_lr1e4/
 Скрипт — тонкая обёртка над `python -m lerobot.scripts.lerobot_train` внутри контейнера `lerobot-workshop:latest`.  
 Пути `/app/...` внутри контейнера = корень репозитория снаружи.  
 HuggingFace-кэш монтируется из `outputs/hf_cache/` — веса **не скачиваются повторно**.
+По умолчанию обёртка также подставляет `--dataset.video_backend=pyav`, `--policy.push_to_hub=false`,
+`--policy.empty_cameras=1` и `rename_map` для сопоставления `front/side -> camera1/camera2`.
+
+### Запуск обучения с mixed precision
+
+Для GPU класса `A100` обычно выгоднее запускать обучение с AMP, чтобы уменьшить расход памяти и ускорить train.
+
+```bash
+./run_official_smolvla_train_cached_amp.sh \
+    --policy.path=/app/outputs/models/lerobot_smolvla_base_sanitized_lr1e4 \
+    --dataset.repo_id=final-dataset \
+    --dataset.root=/app/final-dataset \
+    --batch_size=32 \
+    --steps=20000 \
+    --output_dir=/app/outputs/train/final_dataset_main_amp \
+    --job_name=final_dataset_main_amp \
+    --policy.device=cuda \
+    --wandb.enable=false \
+    --log_freq=50 \
+    --save_freq=1000 \
+    --num_workers=4
+```
+
+Скрипт `run_official_smolvla_train_cached_amp.sh` использует тот же контейнер и те же дефолты, что и обычный запуск,
+но дополнительно передаёт `--policy.use_amp=true`. При необходимости этот флаг можно переопределить вручную через аргументы командной строки.
 
 ### Ключевые гиперпараметры
 
@@ -337,6 +370,7 @@ docker run --rm --gpus all \
         --checkpoint-step 12000 \
         --episodes 5 \
         --max-steps 700 \
+        --fps 10 \
         --seed 42 \
         --device cuda \
         --summary-path /app/outputs/eval/run_ckpt12000.json
