@@ -8,18 +8,23 @@ from pathlib import Path
 class CollectDataConfig:
     seed: int | None = 0
     repo_name: str = "so101_pnp"
-    num_demo: int = 30
-    root: Path = Path("./sim_data")
+    num_demo: int = 150
+    root: Path = Path("./simulation_data")
     use_master_arm: bool = True
     leader_port: str = "/dev/ttyACM0"
     leader_id: str = "my_leader"
     motion_threshold: float = 0.03
     task_name: str = "Put cube on plate"
     xml_path: str = "./asset/example_scene_y.xml"
-    fps: int = 20
+    fps: int = 10
     image_size: tuple[int, int] = (640, 480)  # (width, height) для PIL.resize
     image_writer_threads: int = 10
     image_writer_processes: int = 5
+    batch_encoding_size: int = 1
+    vcodec: str = "h264"
+    metadata_buffer_size: int = 10
+    streaming_encoding: bool = True
+    encoder_threads: int | None = None
 
     @property
     def action_type(self) -> str:

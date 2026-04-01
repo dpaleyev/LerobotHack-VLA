@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 
@@ -10,6 +11,21 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from mujoco_env.y_env import SimpleEnv
 
 from .config import CollectDataConfig
+
+JOINT_NAMES = [
+    "shoulder_pan.pos",
+    "shoulder_lift.pos",
+    "elbow_flex.pos",
+    "wrist_flex.pos",
+    "wrist_roll.pos",
+    "gripper.pos",
+]
+REQUIRED_FEATURE_KEYS = {
+    "observation.images.front",
+    "observation.images.side",
+    "observation.state",
+    "action",
+}
 
 
 @dataclass(slots=True)
@@ -43,41 +59,63 @@ def create_or_load_dataset(config: CollectDataConfig) -> LeRobotDataset:
         return LeRobotDataset.create(
             repo_id=config.repo_name,
             root=str(config.root),
-            robot_type="so101",
+            robot_type="so_follower",
             fps=config.fps,
             features={
-                "observation.image": {
-                    "dtype": "image",
+                "observation.images.front": {
+                    "dtype": "video",
                     "shape": (480, 640, 3),
                     "names": ["height", "width", "channels"],
                 },
-                "observation.wrist_image": {
-                    "dtype": "image",
+                "observation.images.side": {
+                    "dtype": "video",
                     "shape": (480, 640, 3),
                     "names": ["height", "width", "channels"],
                 },
                 "observation.state": {
                     "dtype": "float32",
                     "shape": (6,),
-                    "names": ["state"],
+                    "names": JOINT_NAMES,
                 },
                 "action": {
                     "dtype": "float32",
                     "shape": (6,),
-                    "names": ["action"],
-                },
-                "obj_init": {
-                    "dtype": "float32",
-                    "shape": (14,),
-                    "names": ["obj_init"],
+                    "names": JOINT_NAMES,
                 },
             },
+            use_videos=True,
             image_writer_threads=config.image_writer_threads,
             image_writer_processes=config.image_writer_processes,
+            batch_encoding_size=config.batch_encoding_size,
+            vcodec=config.vcodec,
+            metadata_buffer_size=config.metadata_buffer_size,
+            streaming_encoding=config.streaming_encoding,
+            encoder_threads=config.encoder_threads,
         )
 
     print("Загружаю существующий датасет")
-    return LeRobotDataset(config.repo_name, root=str(config.root))
+    info_path = config.root / "meta" / "info.json"
+    if not info_path.exists():
+        raise FileNotFoundError(f"Не найден metadata-файл датасета: {info_path}")
+
+    info = json.loads(info_path.read_text())
+    existing_keys = set(info.get("features", {}))
+    if info.get("robot_type") != "so_follower" or not REQUIRED_FEATURE_KEYS.issubset(existing_keys):
+        raise ValueError(
+            "Существующий датасет записан в старом формате и несовместим с новой схемой записи. "
+            "Удалите папку и создайте датасет заново, либо продолжайте писать в новый root."
+        )
+
+    return LeRobotDataset.resume(
+        config.repo_name,
+        root=str(config.root),
+        image_writer_threads=config.image_writer_threads,
+        image_writer_processes=config.image_writer_processes,
+        batch_encoding_size=config.batch_encoding_size,
+        vcodec=config.vcodec,
+        streaming_encoding=config.streaming_encoding,
+        encoder_threads=config.encoder_threads,
+    )
 
 
 def collect_demonstrations(config: CollectDataConfig, env: SimpleEnv, dataset: LeRobotDataset, controller) -> None:
@@ -118,11 +156,10 @@ def collect_demonstrations(config: CollectDataConfig, env: SimpleEnv, dataset: L
         if state.record_flag:
             dataset.add_frame(
                 {
-                    "observation.image": agent_image,
-                    "observation.wrist_image": wrist_image,
+                    "observation.images.front": agent_image,
+                    "observation.images.side": wrist_image,
                     "observation.state": ee_pose,
                     "action": commanded_q,
-                    "obj_init": env.obj_init_pose,
                     "task": config.task_name,
                 }
             )

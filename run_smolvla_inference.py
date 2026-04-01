@@ -27,8 +27,8 @@ from smolvla_defaults import (
 )
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent
-FRONT_CAMERA_KEYS = {"observation.image", "observation.images.camera1"}
-SIDE_CAMERA_KEYS = {"observation.wrist_image", "observation.images.camera2"}
+FRONT_CAMERA_KEYS = {"observation.image", "observation.images.front", "observation.images.camera1"}
+SIDE_CAMERA_KEYS = {"observation.wrist_image", "observation.images.side", "observation.images.camera2"}
 ZERO_CAMERA_KEYS = {"observation.images.camera3"}
 EMPTY_CAMERA_PREFIX = "observation.images.empty_camera_"
 STATE_KEY = "observation.state"
